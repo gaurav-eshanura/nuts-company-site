@@ -121,6 +121,10 @@ for page in pages:
         tag = m.group(0)
         if "alt=" not in tag:
             fail(page, f"img without alt: {tag[:70]}")
+        # Intrinsic dimensions let the browser reserve the box before the file
+        # arrives; without them every image is a layout shift when it pops in.
+        if "width=" not in tag or "height=" not in tag:
+            fail(page, f"img without width/height (CLS risk): {tag[:70]}")
 
     # aria-current is legitimate in two places: the current nav item and the
     # last breadcrumb crumb. Check each on its own terms rather than counting.
@@ -143,6 +147,101 @@ for page in pages:
             fail(page, "no breadcrumb navigation")
         elif 'aria-current="page"' not in crumbs.group(0):
             fail(page, "breadcrumb has no aria-current on its last item")
+
+# ----------------------------------------------------- 4. origin consistency
+# Everything machine-read by a crawler - canonical, OG, JSON-LD, sitemap,
+# robots - has to name the host that actually serves the site. Getting this
+# wrong makes a live URL declare itself a duplicate of a domain that does not
+# resolve, and search engines drop it. That regression has already happened
+# once here, so it is now a build failure rather than something to spot.
+SITE = None
+_cfg = read(os.path.join(BUILD_DIR, "site-config.mjs"))
+_m = re.search(r'process\.env\.SITE_ORIGIN\s*\|\|\s*"([^"]+)"', _cfg)
+if not _m:
+    fail("site-config.mjs", "cannot read the SITE default")
+else:
+    SITE = _m.group(1).rstrip("/")
+
+sitemap_raw = read(os.path.join(ROOT, "sitemap.xml"))
+robots_raw = read(os.path.join(ROOT, "robots.txt"))
+
+sitemap_locs = re.findall(r"<loc>([^<]+)</loc>", sitemap_raw)
+robots_sitemap = re.search(r"^Sitemap:\s*(\S+)", robots_raw, re.M)
+
+if SITE:
+    for loc in sitemap_locs:
+        if not loc.startswith(SITE):
+            fail("sitemap.xml", f"URL not on the live origin {SITE}: {loc}")
+    if robots_sitemap and robots_sitemap.group(1) != f"{SITE}/sitemap.xml":
+        fail("robots.txt", f"Sitemap is {robots_sitemap.group(1)}, expected {SITE}/sitemap.xml")
+    if re.search(r"^User-agent:\s*\*\s*\n\s*Disallow:\s*\S", robots_raw, re.M):
+        fail("robots.txt", "blocks all crawlers")
+
+    # every indexable page must be in the sitemap, and every sitemap URL real.
+    # The home page normalises to "/" and is checked separately.
+    expected_in_sitemap = {"nuts.html", "about.html", "retailers.html",
+                           "distributors.html", "contact.html", "legal.html"}
+    listed = {loc.replace(SITE + "/", "") for loc in sitemap_locs}
+    listed.discard("")
+    if f"{SITE}/" not in sitemap_locs:
+        fail("sitemap.xml", f"missing the home page {SITE}/")
+    for p in expected_in_sitemap:
+        if p not in listed:
+            fail("sitemap.xml", f"missing {SITE}/{p}")
+    for extra in listed - expected_in_sitemap:
+        fail("sitemap.xml", f"unexpected entry (no matching page): {extra}")
+
+    for page in pages:
+        if page == "404.html":
+            continue
+        html = read(os.path.join(ROOT, page))
+        path = "" if page == "index.html" else page
+
+        checks = [
+            ("canonical", rf'<link rel="canonical" href="{re.escape(SITE)}/{re.escape(path)}"'),
+            ("og:url", rf'<meta property="og:url" content="{re.escape(SITE)}/{re.escape(path)}"'),
+        ]
+        for label, pattern in checks:
+            if not re.search(pattern, html):
+                got = re.search(pattern.replace(re.escape(SITE), "(.*?)", 1).replace(
+                    re.escape(path), "(.*?)", 1).replace(re.escape(SITE + "/"), "(.*?)"), html)
+                fail(page, f"{label} points somewhere other than the live origin: "
+                           f"{got.group(1) if got else 'absent'}")
+
+        # structured data
+        ld = re.search(r'<script type="application/ld\+json">(.*?)</script>', html, re.S)
+        if not ld:
+            fail(page, "no JSON-LD block")
+        else:
+            try:
+                doc = json.loads(ld.group(1))
+            except Exception as e:
+                fail(page, f"JSON-LD is not valid JSON: {e}")
+                doc = None
+            if doc is not None:
+                types = [n.get("@type") for n in doc.get("@graph", [])]
+                for required in ("Organization", "WebSite"):
+                    if required not in types:
+                        fail(page, f"JSON-LD missing {required}")
+                if page in expected_in_sitemap and page != "index.html":
+                    if "BreadcrumbList" not in types:
+                        fail(page, "JSON-LD missing BreadcrumbList")
+                if page == "index.html" and "BreadcrumbList" in types:
+                    fail(page, "home page should not declare a BreadcrumbList")
+                if page == "nuts.html":
+                    for required in ("ItemList", "Product"):
+                        if required not in types:
+                            fail(page, f"nuts.html JSON-LD missing {required}")
+
+                # A repacker cannot stand behind published prices or nutrition.
+                # An Offer with an invented number is a rich result stating
+                # something false, which is worse than no rich result.
+                blob = json.dumps(doc)
+                for forbidden in ('"price"', '"offers"', '"priceCurrency"',
+                                  '"nutrition"', '"calories"'):
+                    if forbidden in blob:
+                        fail(page, f"JSON-LD contains {forbidden} - "
+                                   f"a repacker must not publish prices or nutrition")
 
 # ------------------------------------------------------------------ report
 if problems:

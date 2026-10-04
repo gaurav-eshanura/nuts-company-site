@@ -29,8 +29,13 @@ jobs:
       - name: Build pages
         run: npm run build
 
-      - name: Verify links, catalogue and a11y basics
+      - name: Verify links, catalogue, SEO and a11y basics
         run: npm run check
+
+      # proves the gate itself still bites: injects 14 regressions and asserts
+      # each one is caught, then restores the tree
+      - name: Fault-inject the gate
+        run: npm run test:gate
 
       - name: Assemble dist
         run: npm run dist

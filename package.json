@@ -15,7 +15,8 @@
     "all": "npm run assets && npm run fonts && npm run build && npm run check && npm run dist",
     "dist": "node build/dist.mjs",
     "submit": "node build/submit.mjs",
-    "deploy": "npm run build && npm run check && npm run dist && firebase deploy --only hosting && npm run submit"
+    "deploy": "npm run build && npm run check && npm run dist && firebase deploy --only hosting && npm run submit",
+    "test:gate": "python build/test_gate.py"
   },
   "engines": {
     "node": ">=20"
