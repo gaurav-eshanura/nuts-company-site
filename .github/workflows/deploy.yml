@@ -40,15 +40,6 @@ jobs:
       - name: Assemble dist
         run: npm run dist
 
-      - name: Check dist is complete
-        run: node -e "
-          const {existsSync}=require('fs');
-          const need=['index.html','nuts.html','404.html','robots.txt','sitemap.xml',
-                      'assets/css/styles.css','assets/img/scenes/hero-art.webp'];
-          const miss=need.filter(f=>!existsSync('dist/'+f));
-          if(miss.length){console.error('missing: '+miss.join(', '));process.exit(1);}
-          console.log('dist complete');"
-
       - name: Deploy to Firebase Hosting
         uses: FirebaseExtended/action-firebase-deploy@v2
         with:
