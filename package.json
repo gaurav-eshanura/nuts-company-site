@@ -1,0 +1,27 @@
+{
+  "name": "the-nuts-company-site",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Brand website for The Nuts Company, an Eshanura Enterprises brand.",
+  "type": "module",
+  "scripts": {
+    "assets": "python build/extract_assets.py",
+    "fonts": "python build/fetch_fonts.py",
+    "build": "node build/site.mjs",
+    "check": "python build/check_site.py",
+    "serve": "node build/serve.mjs",
+    "smoke": "node build/smoke.mjs",
+    "shots": "node build/screenshot.mjs",
+    "all": "npm run assets && npm run fonts && npm run build && npm run check && npm run dist",
+    "dist": "node build/dist.mjs",
+    "submit": "node build/submit.mjs",
+    "deploy": "npm run build && npm run check && npm run dist && firebase deploy --only hosting && npm run submit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "axe-core": "^4.13.0",
+    "playwright": "^1.60.0"
+  }
+}

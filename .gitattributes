@@ -1,0 +1,9 @@
+# Keep text files as LF everywhere, including the CI checkout on Linux.
+# Without this, git's autocrlf rewrites them to CRLF on Windows checkouts and
+# the committed HTML/CSS/JS differ from what is deployed.
+* text=auto eol=lf
+
+*.woff2 binary
+*.webp binary
+*.png binary
+*.jpg binary

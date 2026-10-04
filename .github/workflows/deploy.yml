@@ -1,0 +1,62 @@
+name: Deploy
+
+# Every push to main: regenerate the site, verify it, publish it, then tell the
+# search engines it changed. Assets and fonts are committed to the repo, so the
+# pipeline needs no design sheet and no network access to Google Fonts.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # gates that must pass before anything is published
+      - name: Build pages
+        run: npm run build
+
+      - name: Verify links, catalogue and a11y basics
+        run: npm run check
+
+      - name: Assemble dist
+        run: npm run dist
+
+      - name: Check dist is complete
+        run: node -e "
+          const {existsSync}=require('fs');
+          const need=['index.html','nuts.html','404.html','robots.txt','sitemap.xml',
+                      'assets/css/styles.css','assets/img/scenes/hero-art.webp'];
+          const miss=need.filter(f=>!existsSync('dist/'+f));
+          if(miss.length){console.error('missing: '+miss.join(', '));process.exit(1);}
+          console.log('dist complete');"
+
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-firebase-deploy@v2
+        with:
+          firebaseProject: thenutscompany-eshanura
+          projectId: thenutscompany-eshanura
+          workingDirectory: .
+          args: deploy --only hosting --project thenutscompany-eshanura
+        env:
+          FIREBASE_CLI_EXPERIMENTS: webframeworks
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+
+      - name: Notify search engines
+        run: npm run submit
+        env:
+          INDEXNOW_KEY: ${{ secrets.INDEXNOW_KEY }}
