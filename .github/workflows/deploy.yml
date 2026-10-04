@@ -1,10 +1,22 @@
 name: Deploy
+
+# Every push to main: regenerate the site, verify it, prove the gate still
+# bites, publish it, then tell the search engines it changed.
+#
+# Assets and fonts are committed, so the pipeline needs neither the design
+# sheet nor network access to Google Fonts.
 on:
   push:
     branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
 permissions:
   contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -13,13 +25,50 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      # ---- validation: always runs, needs no credentials ------------------
+
       - name: Build pages
         run: npm run build
-      - name: Verify
+
+      - name: Verify links, catalogue, SEO and a11y basics
         run: npm run check
+
+      # Injects 14 regressions one at a time and asserts each is caught, so a
+      # gate that has quietly stopped failing is itself a build failure.
       - name: Fault-inject the gate
         run: npm run test:gate
+
+      # dist.mjs already refuses to write an incomplete dist and exits non-zero.
       - name: Assemble dist
         run: npm run dist
+
+      # ---- publish --------------------------------------------------------
+
+      # The credential is read from env inside the script rather than gating
+      # the step with `if: ${{ secrets... }}`. GitHub rejects the secrets
+      # context in a step-level if, and the run dies before any job starts.
+      - name: Deploy to Firebase Hosting
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          if [ -z "${FIREBASE_TOKEN:-}" ]; then
+            echo "::notice title=Validation passed, nothing published::"
+            echo "::notice::No Firebase credential configured for CI. Add the"
+            echo "::notice::FIREBASE_SERVICE_ACCOUNT and FIREBASE_TOKEN secrets"
+            echo "::notice::to publish automatically, or run npm run deploy locally."
+            exit 0
+          fi
+          npx --yes firebase-tools@latest deploy \
+            --only hosting \
+            --project thenutscompany-eshanura \
+            --non-interactive \
+            --token "$FIREBASE_TOKEN"
+
+      # ---- tell the engines ------------------------------------------------
+
       - name: Notify search engines
         run: npm run submit
+        env:
+          INDEXNOW_KEY: ${{ secrets.INDEXNOW_KEY }}
